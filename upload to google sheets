@@ -1,0 +1,322 @@
+#include "ESP8266WiFi.h"
+#include "HTTPSRedirect.h"
+#include "DebugMacros.h"
+
+// Fill ssid and password with your network credentials
+
+const char* ssid = "Leobotics";
+
+const char* password = "leobotics123";
+
+int sheetHumid = 1;
+
+int sheetTemp  = 2;
+
+int sheetaqu   = 3;
+
+String readaqu = "";
+
+const char* host = "script.google.com";
+
+// Replace with your own script id to make server side changes
+
+const char *GScriptId = "AKfycbyu_JnX7F29Ea5cZUy7HdsFbv9W5UmedmNbhTwt5tznwRUiQhYS";
+
+const int httpsPort = 443;
+
+// echo | openssl s_client -connect script.google.com:443 |& openssl x509 -fingerprint -noout
+
+const char* fingerprint = "ED:83:75:6B:83:FE:01:DE:BA:72:84:05:71:FA:CE:54:FB:6E:23:CA";
+
+//const uint8_t fingerprint[20] = {};
+
+
+// Write to Google Spreadsheet
+
+String url = String("/macros/s/") + GScriptId + "/exec?value=Hello";
+
+// Fetch Google Calendar events for 1 week ahead
+
+String url2 = String("/macros/s/") + GScriptId + "/exec?cal";
+
+// Read from Google Spreadsheet
+
+String url3 = String("/macros/s/") + GScriptId + "/exec?read";
+
+String payload_base =  "{\"command\": \"appendRow\", \
+                    \"sheet_name\": \"Sheet1\", \
+                    \"values\": ";
+String payload = "";
+
+HTTPSRedirect* client = nullptr;
+
+// used to store the values of free stack and heap
+// before the HTTPSRedirect object is instantiated
+// so that they can be written to Google sheets
+// upon instantiation
+
+unsigned int free_heap_before = 10;
+
+unsigned int free_stack_before = 20;
+
+void setup() {
+
+  Serial.begin(115200);
+
+  Serial.print("Connecting to wifi: ");
+
+  Serial.println(ssid);
+
+  WiFi.begin(ssid, password);
+
+  while (WiFi.status() != WL_CONNECTED) {
+
+    delay(500);
+
+    Serial.print(".");
+
+  }
+
+  Serial.println("");
+
+  Serial.println("WiFi connected");
+
+//  Serial.println("IP address: ");
+//  Serial.println(WiFi.localIP());
+
+  // Use HTTPSRedirect class to create a new TLS connection
+
+  client = new HTTPSRedirect(httpsPort);
+
+  client->setInsecure();
+
+  client->setPrintResponseBody(true);
+
+  client->setContentTypeHeader("application/json");
+
+  Serial.print("Connecting to ");
+
+  Serial.println(host);
+
+  // Try to connect for a maximum of 5 times
+  bool flag = false;
+
+  for (int i=0; iconnect(host, httpsPort);
+
+    if (retval == 1) {
+
+       flag = true;
+
+       break;
+    }
+
+    else
+
+      Serial.println("Connection failed. Retrying...");
+  }
+
+  if (!flag){
+
+    Serial.print("Could not connect to server: ");
+
+    Serial.println(host);
+
+    Serial.println("Exiting...");
+
+    return;
+  }
+
+}
+
+void loop() {
+
+  datasend();
+
+  static int error_count = 0;
+
+  static int connect_count = 0;
+
+  const unsigned int MAX_CONNECT = 20;
+
+  static bool flag = false;
+
+  if (!flag){
+
+    client = new HTTPSRedirect(httpsPort);
+
+    client->setInsecure();
+
+    flag = true;
+
+    client->setPrintResponseBody(true);
+
+    client->setContentTypeHeader("application/json");
+
+  }
+
+  if (client != nullptr){
+
+    if (!client->connected()){
+
+      client->connect(host, httpsPort);
+
+      payload = payload_base + "\"" + sheetaqu + "," + sheetTemp + "," + sheetHumid + "\"}";
+
+      client->POST(url2, host, payload, false);
+
+    }
+  }
+
+  else{
+
+    DPRINTLN("Error creating client object!");
+
+    error_count = 5;
+
+  }
+
+  if (connect_count > MAX_CONNECT){
+
+    connect_count = 0;
+
+    flag = false;
+
+    delete client;
+
+    return;
+
+  }
+
+  Serial.println("GET Data from cell 'A1':");
+
+  if (client->GET(url3, host)){
+
+    ++connect_count;
+
+    payload = payload_base + "\"" + readaqu + "," + sheetaqu + "," + sheetTemp + "," + sheetHumid + "\"}";
+
+    Serial.println("RECIEVED DATA IS GIVEN BELOW   ");
+
+    Serial.println("                              ");
+
+    Serial.println("1");
+
+    Serial.println(readaqu);
+
+    Serial.println("2");
+
+    Serial.println(sheetaqu);
+
+    Serial.println("3");
+
+    Serial.println(sheetTemp);
+
+    Serial.println("4");
+
+    Serial.println(sheetHumid);
+
+    Serial.println("                              ");
+    Serial.println("RECEIVE DATA PRINT IS OVER  ");
+
+    sheetaqu ++;
+
+    sheetTemp ++;
+
+    sheetHumid ++;
+
+  }
+  else{
+
+    ++error_count;
+
+    DPRINT("Error-count while connecting: ");
+
+    DPRINTLN(error_count);
+
+  }
+
+  Serial.println("POST append memory data to spreadsheet:");
+
+  payload = payload_base + "\"" + sheetaqu + "," + sheetTemp + "," + sheetHumid + "\"}";
+
+  if(client->POST(url2, host, payload)){
+
+    ;
+  }
+
+  else{
+
+    ++error_count;
+
+    DPRINT("Error-count while connecting: ");
+
+    DPRINTLN(error_count);
+
+  }
+
+  if (error_count > 3){
+
+    Serial.println("Halting processor..."); 
+
+    delete client;
+
+    client = nullptr;
+
+  }
+
+  delay(4000);
+
+}
+
+
+void datasend()
+
+{
+   // Send memory data to Google Sheets
+
+  payload = payload_base + "\"" + sheetaqu + "," + sheetTemp + "," + sheetHumid + "\"}";
+
+  client->POST(url2, host, payload, false);
+
+  payload = payload_base + "\"" + sheetaqu + "," + sheetTemp + "," + sheetHumid + "\"}";
+
+  client->POST(url2, host, payload, false);
+
+  // Note: setup() must finish within approx. 1s, or the the watchdog timer
+  // will reset the chip. Hence don't put too many requests in setup()
+  // ref: https://github.com/esp8266/Arduino/issues/34
+
+  Serial.println("\nGET: Write into cell 'A1'");
+
+  Serial.println("=========================");
+
+  // fetch spreadsheet data
+
+  client->GET(url, host);
+
+  // Send memory data to Google Sheets
+
+  payload = payload_base + "\"" + sheetaqu + "," + sheetTemp + "," + sheetHumid + "\"}";
+
+  client->POST(url2, host, payload, false);
+
+  Serial.println("\nGET: Fetch Google Calendar Data:");
+
+  Serial.println("================================");
+
+  // fetch spreadsheet data
+
+  client->GET(url2, host);
+
+  // Send memory data to Google Sheets
+
+  payload = payload_base + "\"" + sheetaqu + "," + sheetTemp + "," + sheetHumid + "\"}";
+
+  client->POST(url2, host, payload, false);
+
+  Serial.println("\nSeries of GET and POST requests");
+
+  Serial.println("===============================");
+
+
+  // delete HTTPSRedirect object
